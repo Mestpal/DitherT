@@ -5,17 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dither Tool</title>
   <link rel="stylesheet" href="style.css">
-  <!-- Default language loaded first so LANG is available when script.js runs -->
-  <script src="languages/EN.js"></script>
+  <script src="lenguages/EN.js"></script>
+  <script src="lenguages/ES.js"></script>
+  <script src="script.js" defer></script>
 </head>
 <body>
 
-<!-- ══ GLOBAL TOOLTIP (fixed, always on top) ══ -->
 <div id="tooltip"></div>
 
 <header>
   <h1 data-i18n="appName">Dither Tool</h1>
-  <span class="tag">v5.0</span>
+  <span class="tag">v6.0</span>
   <span class="tag" data-i18n="tagSvg">SVG · IMG · VIDEO</span>
   <div class="lang-switcher">
     <button class="lang-btn active" data-lang="EN" onclick="setLanguage('EN')">EN</button>
@@ -24,8 +24,6 @@
 </header>
 
 <div class="main">
-
-  <!-- ══════════════ SIDEBAR ══════════════ -->
   <div class="sidebar" id="sidebar">
 
     <!-- SOURCE -->
@@ -53,7 +51,7 @@
           oninput="syncSlider('canvasSize','canvasSizeNum'); updateCanvasSize(this.value)">
         <input type="number" class="num-input" id="canvasSizeNum" value="360"
           onchange="syncNum('canvasSizeNum','canvasSize'); updateCanvasSize(document.getElementById('canvasSize').value)">
-        <i class="info-icon" data-i18n-tip="tipCanvasSize" data-tip="Size of the dithered preview in pixels (200–600). Does not affect the original or crop view.">i</i>
+        <i class="info-icon" data-i18n-tip="tipCanvasSize" data-tip="">i</i>
       </div>
     </div>
 
@@ -63,16 +61,20 @@
       <div class="row">
         <label data-i18n="resolution">Resolution</label>
         <input type="range" id="gridRes" min="4" max="80" value="20" step="1"
-          oninput="syncSlider('gridRes','gridResNum'); scheduleRender()">
+          oninput="syncSlider('gridRes','gridResNum')">
         <input type="number" class="num-input" id="gridResNum" value="20"
-          onchange="syncNum('gridResNum','gridRes'); scheduleRender()">
-        <i class="info-icon" data-i18n-tip="tipResolution" data-tip="Cell size in pixels (4–80). Lower = fine grain. Higher = chunky look.">i</i>
+          onchange="syncNum('gridResNum','gridRes')">
+        <i class="info-icon" data-i18n-tip="tipResolution" data-tip="">i</i>
       </div>
       <div class="anim-toggle" onclick="toggleAnimPanel('gridRes')">
         <span class="anim-toggle-icon" id="animArrow_gridRes">▼</span>
         <span data-i18n="animToggleLabel">A ↔ B animate</span>
       </div>
       <div class="anim-panel" id="animPanel_gridRes">
+        <div class="anim-row anim-enable-row">
+          <input type="checkbox" class="anim-cb" id="animCb_gridRes">
+          <label for="animCb_gridRes" data-i18n="animEnable">Enable</label>
+        </div>
         <div class="anim-row">
           <label data-i18n="animFirst">First</label>
           <input type="number" class="anim-num" id="animFirst_gridRes" value="4" min="4" max="80">
@@ -91,14 +93,14 @@
       <div class="section-title" data-i18n="secColours">Colours</div>
       <div class="row">
         <label data-i18n="background">Background</label>
-        <input type="color" id="bgColor" value="#000000" oninput="scheduleRender()">
-        <i class="info-icon" data-i18n-tip="tipBackground" data-tip="Fill colour for empty space behind dithered cells.">i</i>
+        <input type="color" id="bgColor" value="#000000">
+        <i class="info-icon" data-i18n-tip="tipBackground" data-tip="">i</i>
       </div>
       <div style="margin-bottom:8px">
-        <label data-i18n="hlLevels">7 Highlight levels (shadow → highlight)</label>
+        <label data-i18n="hlLevels">7 Highlight levels</label>
         <div class="highlight-strip" id="highlightStrip"></div>
-        <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
-          <label style="margin:0; min-width:58px" data-i18n="editLevel">Edit level</label>
+        <div style="margin-top:6px;display:flex;gap:6px;align-items:center;">
+          <label style="margin:0;min-width:58px" data-i18n="editLevel">Edit level</label>
           <select id="hlSelect" onchange="updateHlPicker()">
             <option value="0">Level 1 (shadow)</option>
             <option value="1">Level 2</option>
@@ -121,7 +123,7 @@
         <div class="svg-color-row">
           <label style="margin:0" data-i18n="shapeColour">Shape colour</label>
           <input type="color" id="svgColorPicker" value="#ffffff" oninput="updateSvgColor(this.value)">
-          <span style="font-size:10px; color:var(--muted)" id="activeSlotLabel">slot 1</span>
+          <span style="font-size:10px;color:var(--muted)" id="activeSlotLabel">slot 1</span>
         </div>
       </div>
     </div>
@@ -133,16 +135,20 @@
       <div class="row">
         <label data-i18n="minSize">Min size</label>
         <input type="range" id="scaleMin" min="0" max="100" value="10" step="1"
-          oninput="syncSlider('scaleMin','scaleMinNum'); scheduleRender()">
+          oninput="syncSlider('scaleMin','scaleMinNum')">
         <input type="number" class="num-input" id="scaleMinNum" value="10"
-          onchange="syncNum('scaleMinNum','scaleMin'); scheduleRender()">
-        <i class="info-icon" data-i18n-tip="tipMinSize" data-tip="Minimum cell size as % of grid (0–100). Dark pixels use this.">i</i>
+          onchange="syncNum('scaleMinNum','scaleMin')">
+        <i class="info-icon" data-i18n-tip="tipMinSize" data-tip="">i</i>
       </div>
       <div class="anim-toggle" onclick="toggleAnimPanel('scaleMin')">
         <span class="anim-toggle-icon" id="animArrow_scaleMin">▼</span>
         <span data-i18n="animToggleLabel">A ↔ B animate</span>
       </div>
       <div class="anim-panel" id="animPanel_scaleMin">
+        <div class="anim-row anim-enable-row">
+          <input type="checkbox" class="anim-cb" id="animCb_scaleMin">
+          <label for="animCb_scaleMin" data-i18n="animEnable">Enable</label>
+        </div>
         <div class="anim-row">
           <label data-i18n="animFirst">First</label>
           <input type="number" class="anim-num" id="animFirst_scaleMin" value="0" min="0" max="100">
@@ -158,16 +164,20 @@
       <div class="row" style="margin-top:10px">
         <label data-i18n="maxSize">Max size</label>
         <input type="range" id="scaleMax" min="10" max="200" value="100" step="1"
-          oninput="syncSlider('scaleMax','scaleMaxNum'); scheduleRender()">
+          oninput="syncSlider('scaleMax','scaleMaxNum')">
         <input type="number" class="num-input" id="scaleMaxNum" value="100"
-          onchange="syncNum('scaleMaxNum','scaleMax'); scheduleRender()">
-        <i class="info-icon" data-i18n-tip="tipMaxSize" data-tip="Maximum cell size as % of grid (10–200). Bright pixels use this. >100 = overlap.">i</i>
+          onchange="syncNum('scaleMaxNum','scaleMax')">
+        <i class="info-icon" data-i18n-tip="tipMaxSize" data-tip="">i</i>
       </div>
       <div class="anim-toggle" onclick="toggleAnimPanel('scaleMax')">
         <span class="anim-toggle-icon" id="animArrow_scaleMax">▼</span>
         <span data-i18n="animToggleLabel">A ↔ B animate</span>
       </div>
       <div class="anim-panel" id="animPanel_scaleMax">
+        <div class="anim-row anim-enable-row">
+          <input type="checkbox" class="anim-cb" id="animCb_scaleMax">
+          <label for="animCb_scaleMax" data-i18n="animEnable">Enable</label>
+        </div>
         <div class="anim-row">
           <label data-i18n="animFirst">First</label>
           <input type="number" class="anim-num" id="animFirst_scaleMax" value="50" min="10" max="200">
@@ -188,7 +198,7 @@
         <label>
           <span data-i18n="invertLuminance">Invert luminance</span>
           <i class="info-icon" style="display:inline-flex;margin-left:4px;vertical-align:middle"
-            data-i18n-tip="tipInvert" data-tip="Inverts brightness before dithering.">i</i>
+            data-i18n-tip="tipInvert" data-tip="">i</i>
         </label>
         <div class="toggle" id="toggleInvert" onclick="toggleInvert(this)"></div>
       </div>
@@ -196,7 +206,7 @@
         <label>
           <span data-i18n="pixelRotation">Pixel rotation (snap 90°)</span>
           <i class="info-icon" style="display:inline-flex;margin-left:4px;vertical-align:middle"
-            data-i18n-tip="tipRotation" data-tip="Rotates each cell/shape individually.">i</i>
+            data-i18n-tip="tipRotation" data-tip="">i</i>
         </label>
       </div>
       <div class="rot-btns">
@@ -212,23 +222,23 @@
       <div class="section-title" data-i18n="secMode">Mode</div>
       <div class="row">
         <label data-i18n="ditherMode">Dither</label>
-        <select id="ditherMode" onchange="scheduleRender()">
+        <select id="ditherMode">
           <option value="ordered">Ordered (Bayer)</option>
           <option value="floyd">Floyd-Steinberg</option>
           <option value="threshold">Threshold</option>
           <option value="random">Random noise</option>
         </select>
-        <i class="info-icon" data-i18n-tip="tipMode" data-tip="Ordered: Bayer matrix. Floyd-Steinberg: error diffusion. Threshold: hard 50% cut. Random: noise scatter.">i</i>
+        <i class="info-icon" data-i18n-tip="tipMode" data-tip="">i</i>
       </div>
-      <button class="btn-apply" data-i18n="renderNow"
-        onclick="clearTimeout(renderDebounceTimer); showLoader(false); lockSidebar(false); render()">
+      <button class="btn-apply" data-i18n="renderNow" onclick="triggerRender()">
         ⬡ Render Now
       </button>
     </div>
 
-    <!-- A ↔ B ANIMATION (global section) -->
+    <!-- A ↔ B ANIMATION -->
     <div class="section">
       <div class="section-title" data-i18n="secAnimation">A ↔ B Animation</div>
+      <p class="anim-hint" data-i18n="animHint">Enable sliders above, then press Play.</p>
       <button class="anim-all-btn" id="animAllBtn"
         data-i18n="animStartAll" onclick="toggleAllAnimations()">
         ▶ Start all animations
@@ -237,7 +247,7 @@
 
   </div><!-- /sidebar -->
 
-  <!-- ══════════════ CANVAS AREA ══════════════ -->
+  <!-- CANVAS AREA -->
   <div class="canvas-area" id="canvasArea">
 
     <div class="drop-zone" id="dropZone">
@@ -247,7 +257,6 @@
       </div>
     </div>
 
-    <!-- Crop / Aspect ratio toolbar -->
     <div class="crop-bar" id="cropBar">
       <div class="crop-ratios">
         <button class="ratio-btn active" onclick="setRatio('free',this)" data-i18n="cropFree">Free</button>
@@ -260,22 +269,18 @@
       <span class="crop-hint" data-i18n="cropHint">Drag to pan · Scroll to zoom crop area</span>
     </div>
 
-    <!-- Previews -->
     <div class="preview-wrapper" id="previewWrapper" style="display:none">
 
-      <!-- Crop canvas -->
       <div class="preview-box" id="cropBox" style="display:none">
         <div class="preview-label" data-i18n="labelCrop">Crop</div>
-        <canvas id="cropCanvas" width="320" height="320"></canvas>
+        <canvas id="cropCanvas" width="300" height="300"></canvas>
       </div>
 
-      <!-- Original -->
       <div class="preview-box" id="origBox">
         <div class="preview-label" data-i18n="labelOriginal">Original</div>
         <canvas id="origCanvas"></canvas>
       </div>
 
-      <!-- Dithered + loader overlay -->
       <div class="preview-box" style="position:relative">
         <div class="preview-label" data-i18n="labelDithered">Dithered</div>
         <canvas id="dithCanvas"></canvas>
@@ -285,16 +290,13 @@
         </div>
       </div>
 
-    </div><!-- /preview-wrapper -->
+    </div>
 
   </div><!-- /canvas-area -->
-
 </div><!-- /main -->
 
-<!-- Hidden helpers -->
 <video id="videoEl" class="hidden" muted playsinline></video>
 <canvas id="tempCanvas" class="hidden"></canvas>
 
-<script src="script.js"></script>
 </body>
 </html>

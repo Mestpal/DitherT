@@ -1,9 +1,11 @@
 /* ═══════════════════════════════════════════
    DITHER TOOL — EN.js  (English strings)
-   Version: 5.0
+   Version: 6.0
    ═══════════════════════════════════════════ */
 
-const LANG = {
+// Register into global language store (safe for file:// protocol)
+window.LANGS = window.LANGS || {};
+window.LANGS['EN'] = {
   /* ── Header ── */
   appName:            'Dither Tool',
   tagSvg:             'SVG · IMG · VIDEO',
@@ -68,12 +70,15 @@ const LANG = {
 
   /* ── A↔B Animation ── */
   animToggleLabel:    'A ↔ B animate',
+  animEnable:         'Enable for animation',
   animFirst:          'First',
   animLast:           'Last',
   animSecs:           'Secs',
+  animHint:           'Enable sliders above, then press Play.',
   animStartAll:       '▶ Start all animations',
   animStopAll:        '■ Stop all animations',
   animPrerendering:   '⟳ Pre-rendering…',
+  alertNoSliders:     'Enable at least one slider animation.',
 
   /* ── Crop bar ── */
   cropFree:           'Free',

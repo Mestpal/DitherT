@@ -1,9 +1,11 @@
 /* ═══════════════════════════════════════════
    DITHER TOOL — ES.js  (Español)
-   Versión: 5.0
+   Versión: 6.0
    ═══════════════════════════════════════════ */
 
-const LANG = {
+// Register into global language store (safe for file:// protocol)
+window.LANGS = window.LANGS || {};
+window.LANGS['ES'] = {
   /* ── Cabecera ── */
   appName:            'Dither Tool',
   tagSvg:             'SVG · IMG · VÍDEO',
@@ -68,12 +70,15 @@ const LANG = {
 
   /* ── Animación A↔B ── */
   animToggleLabel:    'Animar A ↔ B',
+  animEnable:         'Activar para la animación',
   animFirst:          'Inicio',
   animLast:           'Fin',
   animSecs:           'Segs',
+  animHint:           'Activa los sliders arriba y pulsa Reproducir.',
   animStartAll:       '▶ Iniciar todas las animaciones',
   animStopAll:        '■ Detener todas las animaciones',
   animPrerendering:   '⟳ Pre-renderizando…',
+  alertNoSliders:     'Activa al menos un slider de animación.',
 
   /* ── Barra de recorte ── */
   cropFree:           'Libre',
