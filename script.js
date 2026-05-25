@@ -1,31 +1,92 @@
 /* ═══════════════════════════════════════════
    DITHER TOOL — script.js
+   Version: 5.0
    ═══════════════════════════════════════════ */
 
 'use strict';
 
 // ─────────────────────────────────────────
-// 1.  TOOLTIP (body-level, never clipped)
+// 0.  I18N  — apply LANG strings to the DOM
+// ─────────────────────────────────────────
+function applyLang() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    if (LANG[key] !== undefined) el.textContent = LANG[key];
+  });
+  document.querySelectorAll('[data-i18n-tip]').forEach(el => {
+    const key = el.dataset.i18nTip;
+    if (LANG[key] !== undefined) el.dataset.tip = LANG[key];
+  });
+  // Highlight-level select options
+  const hlSel = document.getElementById('hlSelect');
+  if (hlSel) {
+    Array.from(hlSel.options).forEach((opt, i) => {
+      if (LANG.hlLevel && LANG.hlLevel[i]) opt.textContent = LANG.hlLevel[i];
+    });
+  }
+  // Dither mode options
+  const modeMap = {
+    ordered:   'modeOrdered',
+    floyd:     'modeFloyd',
+    threshold: 'modeThreshold',
+    random:    'modeRandom',
+  };
+  const modeSel = document.getElementById('ditherMode');
+  if (modeSel) {
+    Array.from(modeSel.options).forEach(opt => {
+      const k = modeMap[opt.value];
+      if (k && LANG[k]) opt.textContent = LANG[k];
+    });
+  }
+  // Drop message (has colored spans inside)
+  const dropEl = document.getElementById('dropMsgText');
+  if (dropEl && LANG.dropMsg) {
+    dropEl.innerHTML = LANG.dropMsg
+      .replace('{image}', `<span>${LANG.dropMsgImage}</span>`)
+      .replace('{video}',  `<span>${LANG.dropMsgVideo}</span>`);
+  }
+}
+
+// Language switcher
+function setLanguage(code) {
+  // Dynamically load the language file by creating a script tag
+  const existing = document.getElementById('langScript');
+  if (existing) existing.remove();
+  const s = document.createElement('script');
+  s.id  = 'langScript';
+  s.src = code + '.js';
+  s.onload = () => { applyLang(); rebuildDynamicUI(); };
+  document.head.appendChild(s);
+
+  document.querySelectorAll('.lang-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.lang === code)
+  );
+  localStorage.setItem('ditherLang', code);
+}
+
+// ─────────────────────────────────────────
+// 1.  TOOLTIP
 // ─────────────────────────────────────────
 const tooltipEl = document.getElementById('tooltip');
 
-document.querySelectorAll('.info-icon').forEach(icon => {
-  icon.addEventListener('mouseenter', e => {
-    tooltipEl.textContent = icon.dataset.tip;
-    tooltipEl.classList.add('visible');
-    positionTooltip(e);
+function bindTooltips() {
+  document.querySelectorAll('.info-icon').forEach(icon => {
+    icon.addEventListener('mouseenter', e => {
+      tooltipEl.textContent = icon.dataset.tip || '';
+      tooltipEl.classList.add('visible');
+      positionTooltip(e);
+    });
+    icon.addEventListener('mousemove', positionTooltip);
+    icon.addEventListener('mouseleave', () => tooltipEl.classList.remove('visible'));
   });
-  icon.addEventListener('mousemove', positionTooltip);
-  icon.addEventListener('mouseleave', () => tooltipEl.classList.remove('visible'));
-});
+}
 
 function positionTooltip(e) {
-  const pad = 12;
+  const pad = 14;
   let x = e.clientX + pad;
   let y = e.clientY - 10;
-  // keep inside viewport
-  if (x + 180 > window.innerWidth)  x = e.clientX - 180 - pad;
-  if (y + 80  > window.innerHeight) y = window.innerHeight - 90;
+  if (x + 185 > window.innerWidth)  x = e.clientX - 185 - pad;
+  if (y + 90  > window.innerHeight) y = window.innerHeight - 95;
   tooltipEl.style.left = x + 'px';
   tooltipEl.style.top  = y + 'px';
 }
@@ -42,56 +103,76 @@ let rotation   = 0;
 let inverted   = false;
 let showOrig   = true;
 
-let sourceImg  = null;   // original Image object
-let canvasSz   = 360;
+let sourceImg  = null;
+let dithCanvasSz = 360;   // ONLY the dithered canvas — original/crop stay at their own size
 let isVideo    = false;
-let animFrame  = null;
+let vidAnimFrame = null;
 
 // crop state
-let cropRatio   = null;   // null = free / [w,h] tuple
-let cropOffX    = 0;
-let cropOffY    = 0;
-let cropScale   = 1;      // how much to scale the source into the crop rect
-let cropDragging= false;
+let cropRatio    = null;
+let cropOffX     = 0, cropOffY = 0;
+let cropScale    = 1;
+let cropDragging = false;
 let cropDragStartX = 0, cropDragStartY = 0;
 let cropDragOX = 0, cropDragOY = 0;
 
-// debounce render
+// ─────────────────────────────────────────
+// 3.  DEBOUNCED RENDER
+//     While the timer is running, all sliders
+//     are disabled (pointer-events blocked).
+// ─────────────────────────────────────────
 let renderDebounceTimer = null;
 const RENDER_DEBOUNCE_MS = 3000;
+let renderLocked = false;
 
-// ─────────────────────────────────────────
-// 3.  DOM REFS
-// ─────────────────────────────────────────
-const origCanvas  = document.getElementById('origCanvas');
-const dithCanvas  = document.getElementById('dithCanvas');
-const cropCanvas  = document.getElementById('cropCanvas');
-const tempCanvas  = document.getElementById('tempCanvas');
-const videoEl     = document.getElementById('videoEl');
-const renderLoader= document.getElementById('renderLoader');
+const origCanvas   = document.getElementById('origCanvas');
+const dithCanvas   = document.getElementById('dithCanvas');
+const cropCanvas   = document.getElementById('cropCanvas');
+const tempCanvas   = document.getElementById('tempCanvas');
+const videoEl      = document.getElementById('videoEl');
+const renderLoader = document.getElementById('renderLoader');
+const sidebarEl    = document.getElementById('sidebar');
+
+function lockSidebar(on) {
+  renderLocked = on;
+  sidebarEl.classList.toggle('locked', on);
+}
+
+function scheduleRender() {
+  if (renderLocked) return;
+  clearTimeout(renderDebounceTimer);
+  showLoader(true);
+  lockSidebar(true);
+  renderDebounceTimer = setTimeout(async () => {
+    await render();
+    showLoader(false);
+    lockSidebar(false);
+  }, RENDER_DEBOUNCE_MS);
+}
+
+function showLoader(on) {
+  renderLoader.classList.toggle('visible', on);
+  const lbl = document.getElementById('loaderLabel');
+  if (lbl) lbl.textContent = LANG.loaderRendering || 'Rendering…';
+}
+
+function setLoaderText(txt) {
+  const lbl = document.getElementById('loaderLabel');
+  if (lbl) lbl.textContent = txt;
+}
 
 // ─────────────────────────────────────────
 // 4.  SLIDER ↔ NUM-INPUT SYNC
 // ─────────────────────────────────────────
-/**
- * Call after a range input changes.
- * sliderId → numId are the element ids.
- */
 function syncSlider(sliderId, numId) {
-  const v = +document.getElementById(sliderId).value;
-  document.getElementById(numId).value = v;
+  document.getElementById(numId).value = document.getElementById(sliderId).value;
 }
 
-/**
- * Call after a number input changes.
- * Clamps to the slider's own min/max and writes back both elements.
- */
 function syncNum(numId, sliderId) {
   const slider = document.getElementById(sliderId);
   const mn = +slider.min, mx = +slider.max, st = +slider.step || 1;
   let v = parseFloat(document.getElementById(numId).value);
   if (isNaN(v)) v = mn;
-  // round to step
   v = Math.round((v - mn) / st) * st + mn;
   v = Math.min(mx, Math.max(mn, v));
   document.getElementById(numId).value = v;
@@ -99,177 +180,150 @@ function syncNum(numId, sliderId) {
 }
 
 // ─────────────────────────────────────────
-// 5.  DEBOUNCED RENDER
-// ─────────────────────────────────────────
-function scheduleRender() {
-  clearTimeout(renderDebounceTimer);
-  showLoader(true);
-  renderDebounceTimer = setTimeout(() => {
-    render().then(() => showLoader(false));
-  }, RENDER_DEBOUNCE_MS);
-}
-
-function showLoader(on) {
-  renderLoader.classList.toggle('visible', on);
-}
-
-// ─────────────────────────────────────────
-// 6.  A↔B ANIMATION SYSTEM
+// 5.  A ↔ B ANIMATION SYSTEM
 // ─────────────────────────────────────────
 /*
-  Each animated slider has an entry in animState:
-    {
-      sliderId, numId,
-      valA, valB, durationSec,
-      running: bool,
-      rafId: null | int,
-      startTime: null | DOMHighResTimeStamp,
-      direction: 1 | -1   (1 = A→B, -1 = B→A)
-      frames: [ {imageData, t} ] | null  — pre-rendered frames
-      frameIdx: int
-      prerendering: bool
-    }
+  animState[sliderId] = {
+    sliderId, numId,
+    valFirst, valLast, durationSec,
+    running, prerendering,
+    rafId, direction, frames, frameIdx
+  }
 */
 const animState = {};
+const ANIM_FRAME_COUNT = 20;
 
-function getAnimState(sliderId) {
+// Sliders that participate in global animate-all
+const ANIMATED_SLIDERS = [
+  { sliderId: 'gridRes',  numId: 'gridResNum'  },
+  { sliderId: 'scaleMin', numId: 'scaleMinNum' },
+  { sliderId: 'scaleMax', numId: 'scaleMaxNum' },
+];
+
+function getAnimState(sliderId, numId) {
   if (!animState[sliderId]) {
     const slider = document.getElementById(sliderId);
     animState[sliderId] = {
-      sliderId,
-      valA: +slider.min,
-      valB: +slider.max,
+      sliderId, numId: numId || sliderId + 'Num',
+      valFirst: +slider.min,
+      valLast:  +slider.max,
       durationSec: 2,
-      running: false,
-      rafId: null,
-      startTime: null,
-      direction: 1,
-      frames: null,
-      frameIdx: 0,
-      prerendering: false,
+      running: false, prerendering: false,
+      rafId: null, direction: 1,
+      frames: null, frameIdx: 0,
     };
   }
   return animState[sliderId];
 }
 
 async function startAnimation(sliderId, numId) {
-  const st = getAnimState(sliderId);
+  const st = getAnimState(sliderId, numId);
   if (st.running || st.prerendering) return;
-  if (!sourceImg) { alert('Load an image first.'); return; }
+  if (!sourceImg) { alert(LANG.alertNoImage || 'Load an image first.'); return; }
 
   st.prerendering = true;
-  const btn = document.getElementById('animBtn_' + sliderId);
-  if (btn) { btn.textContent = '⟳ Pre-rendering…'; btn.classList.add('running'); }
+  lockSidebar(true);
+  renderLoader.classList.add('visible');
 
-  // Pre-render frames
-  const slider  = document.getElementById(sliderId);
+  const slider = document.getElementById(sliderId);
   const mn = +slider.min, mx = +slider.max, step = +slider.step || 1;
-  const frameCount = 20; // fixed number of interpolation frames
-  const gifSz  = canvasSz;
-
   const frames = [];
-  for (let fi = 0; fi <= frameCount; fi++) {
-    const t  = fi / frameCount;
-    const tv = st.valA + (st.valB - st.valA) * t;
+
+  for (let fi = 0; fi <= ANIM_FRAME_COUNT; fi++) {
+    const t  = fi / ANIM_FRAME_COUNT;
+    const tv = st.valFirst + (st.valLast - st.valFirst) * t;
     const v  = Math.min(mx, Math.max(mn, Math.round((tv - mn) / step) * step + mn));
 
-    // Temporarily set slider value for render
     slider.value = v;
     document.getElementById(numId).value = v;
 
+    const txt = (LANG.loaderFrame || 'Frame {n} / {total}')
+      .replace('{n}', fi + 1).replace('{total}', ANIM_FRAME_COUNT + 1);
+    setLoaderText(txt);
+
     const offC = document.createElement('canvas');
-    offC.width = gifSz; offC.height = gifSz;
-
-    const params = collectParams();
-    await renderToCanvas(offC, getCropSource(), params);
-
-    frames.push({ canvas: offC, value: v, t });
-    await new Promise(r => setTimeout(r, 0)); // yield
+    offC.width = dithCanvasSz; offC.height = dithCanvasSz;
+    await renderToCanvas(offC, getCropSource() || sourceImg, collectParams());
+    frames.push({ canvas: offC, value: v });
+    await new Promise(r => setTimeout(r, 0));
   }
 
-  st.frames     = frames;
-  st.frameIdx   = 0;
-  st.direction  = 1;
+  st.frames      = frames;
+  st.frameIdx    = 0;
+  st.direction   = 1;
   st.prerendering = false;
-  st.running    = true;
+  st.running     = true;
 
-  if (btn) { btn.textContent = '■ Stop'; }
+  renderLoader.classList.remove('visible');
+  lockSidebar(false);
 
-  const msPerFrame = (st.durationSec * 1000) / frameCount;
+  slider.classList.add('animating');
+
+  const msPerFrame = (st.durationSec * 1000) / ANIM_FRAME_COUNT;
 
   function tick() {
     if (!st.running) return;
-
     const f = st.frames[st.frameIdx];
-    // Display pre-rendered frame on dithCanvas
-    const ctx = dithCanvas.getContext('2d');
     dithCanvas.width  = f.canvas.width;
     dithCanvas.height = f.canvas.height;
-    ctx.drawImage(f.canvas, 0, 0);
-
-    // Update slider UI
+    dithCanvas.getContext('2d').drawImage(f.canvas, 0, 0);
     slider.value = f.value;
     document.getElementById(numId).value = f.value;
 
-    // Advance
     st.frameIdx += st.direction;
-    if (st.frameIdx >= st.frames.length) {
-      st.frameIdx = st.frames.length - 1;
-      st.direction = -1;
-    } else if (st.frameIdx < 0) {
-      st.frameIdx = 0;
-      st.direction = 1;
-    }
+    if (st.frameIdx >= st.frames.length)  { st.frameIdx = st.frames.length - 1; st.direction = -1; }
+    else if (st.frameIdx < 0)             { st.frameIdx = 0;                     st.direction =  1; }
 
     st.rafId = setTimeout(tick, msPerFrame);
   }
-
   tick();
-
-  // Mark slider as animating
-  const rangeEl = document.getElementById(sliderId);
-  rangeEl.classList.add('animating');
 }
 
-function stopAnimation(sliderId, numId) {
+function stopAnimation(sliderId) {
   const st = animState[sliderId];
   if (!st) return;
   st.running = false;
   clearTimeout(st.rafId);
   st.frames = null;
-
-  const rangeEl = document.getElementById(sliderId);
-  if (rangeEl) rangeEl.classList.remove('animating');
-
-  const btn = document.getElementById('animBtn_' + sliderId);
-  if (btn) { btn.textContent = '▶ Start'; btn.classList.remove('running'); }
+  document.getElementById(sliderId)?.classList.remove('animating');
 }
 
-function toggleAnimation(sliderId, numId) {
-  const st = getAnimState(sliderId);
-  if (st.running || st.prerendering) {
-    stopAnimation(sliderId, numId);
+// ── Global Start / Stop All ──────────────────
+let allAnimRunning = false;
+
+async function toggleAllAnimations() {
+  const btn = document.getElementById('animAllBtn');
+
+  if (allAnimRunning) {
+    // Stop everything
+    ANIMATED_SLIDERS.forEach(s => stopAnimation(s.sliderId));
+    allAnimRunning = false;
+    btn.textContent = LANG.animStartAll || '▶ Start all animations';
+    btn.classList.remove('running');
   } else {
-    startAnimation(sliderId, numId);
+    allAnimRunning = true;
+    btn.textContent = LANG.animStopAll || '■ Stop all animations';
+    btn.classList.add('running');
+
+    // Read panel values into state before starting
+    ANIMATED_SLIDERS.forEach(({ sliderId, numId }) => {
+      const st = getAnimState(sliderId, numId);
+      const fEl = document.getElementById('animFirst_' + sliderId);
+      const lEl = document.getElementById('animLast_'  + sliderId);
+      const sEl = document.getElementById('animSpd_'   + sliderId);
+      const slider = document.getElementById(sliderId);
+      const mn = +slider.min, mx = +slider.max;
+      if (fEl) st.valFirst     = Math.min(mx, Math.max(mn, +fEl.value || mn));
+      if (lEl) st.valLast      = Math.min(mx, Math.max(mn, +lEl.value || mx));
+      if (sEl) st.durationSec  = Math.max(0.2, +sEl.value || 2);
+    });
+
+    // Start all in parallel
+    await Promise.all(ANIMATED_SLIDERS.map(({ sliderId, numId }) => startAnimation(sliderId, numId)));
   }
 }
 
-// Read A/B/speed from the panel inputs and store in state
-function updateAnimParam(sliderId, param, inputId) {
-  const st = getAnimState(sliderId);
-  const v = parseFloat(document.getElementById(inputId).value);
-  if (!isNaN(v)) {
-    const slider = document.getElementById(sliderId);
-    const mn = +slider.min, mx = +slider.max;
-    if (param === 'valA') st.valA = Math.min(mx, Math.max(mn, v));
-    if (param === 'valB') st.valB = Math.min(mx, Math.max(mn, v));
-    if (param === 'durationSec') st.durationSec = Math.max(0.2, v);
-  }
-}
-
-// ─────────────────────────────────────────
-// 7.  ANIM-PANEL TOGGLE (expand/collapse)
-// ─────────────────────────────────────────
+// ── Anim-panel expand/collapse ───────────────
 function toggleAnimPanel(sliderId) {
   const panel = document.getElementById('animPanel_' + sliderId);
   panel.classList.toggle('open');
@@ -278,14 +332,15 @@ function toggleAnimPanel(sliderId) {
 }
 
 // ─────────────────────────────────────────
-// 8.  HIGHLIGHT COLOURS
+// 6.  HIGHLIGHT COLOURS
 // ─────────────────────────────────────────
 function buildHlStrip() {
   const strip = document.getElementById('highlightStrip');
   strip.innerHTML = '';
   hlColors.forEach((c, i) => {
     const s = document.createElement('div');
-    s.className = 'highlight-swatch'; s.style.background = c; s.title = `Level ${i+1}`;
+    s.className = 'highlight-swatch'; s.style.background = c;
+    s.title = (LANG.hlLevel && LANG.hlLevel[i]) || `Level ${i+1}`;
     s.onclick = () => { document.getElementById('hlSelect').value = i; updateHlPicker(); };
     strip.appendChild(s);
   });
@@ -299,14 +354,14 @@ function setHlColor(val) {
 }
 
 // ─────────────────────────────────────────
-// 9.  SVG SLOTS
+// 7.  SVG SLOTS
 // ─────────────────────────────────────────
 function buildSvgSlots() {
   const cont = document.getElementById('svgSlots'); cont.innerHTML = '';
   for (let i = 0; i < N; i++) {
     const slot = document.createElement('div');
     slot.className = 'svg-slot'; slot.id = `slot_${i}`;
-    slot.innerHTML = `<span class="slot-label">SVG ${i+1}</span><div class="slot-preview" id="prev_${i}"></div>`;
+    slot.innerHTML = `<span class="slot-label">${(LANG.svgSlotLabel||'SVG')} ${i+1}</span><div class="slot-preview" id="prev_${i}"></div>`;
     slot.onclick = () => selectSlot(i);
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = '.svg,image/svg+xml'; inp.className = 'hidden'; inp.id = `svgInp_${i}`;
@@ -321,14 +376,14 @@ function selectSlot(i) {
   document.querySelectorAll('.svg-slot').forEach((s, j) => s.classList.toggle('active', j === i));
   document.getElementById('activeSlotInfo').classList.remove('hidden');
   document.getElementById('svgColorPicker').value = svgColors[i];
-  document.getElementById('activeSlotLabel').textContent = `slot ${i+1}`;
+  document.getElementById('activeSlotLabel').textContent = `${LANG.slotLabel||'slot'} ${i+1}`;
   if (!svgData[i]) document.getElementById(`svgInp_${i}`).click();
 }
 function loadSvg(e, i) {
   const f = e.target.files[0]; if (!f) return;
-  const reader = new FileReader();
-  reader.onload = ev => { svgData[i] = ev.target.result; renderSlotPreview(i); scheduleRender(); };
-  reader.readAsText(f);
+  const r = new FileReader();
+  r.onload = ev => { svgData[i] = ev.target.result; renderSlotPreview(i); scheduleRender(); };
+  r.readAsText(f);
 }
 function renderSlotPreview(i) {
   if (!svgData[i]) return;
@@ -338,9 +393,7 @@ function renderSlotPreview(i) {
     `<img src="${URL.createObjectURL(blob)}" width="28" height="28" style="display:block">`;
 }
 function recolorSvg(svgStr, color) {
-  return svgStr
-    .replace(/fill="[^"]*"/g, `fill="${color}"`)
-    .replace(/fill:[^;}"']*/g, `fill:${color}`);
+  return svgStr.replace(/fill="[^"]*"/g, `fill="${color}"`).replace(/fill:[^;}"']*/g, `fill:${color}`);
 }
 function updateSvgColor(val) {
   if (activeSlot < 0) return;
@@ -348,7 +401,7 @@ function updateSvgColor(val) {
 }
 
 // ─────────────────────────────────────────
-// 10. UI TOGGLES
+// 8.  UI TOGGLES
 // ─────────────────────────────────────────
 function toggleOrig(el) {
   el.classList.toggle('on'); showOrig = el.classList.contains('on');
@@ -362,12 +415,15 @@ function setRot(deg, btn) {
   document.querySelectorAll('.rot-btn').forEach(b => b.classList.remove('active-rot'));
   btn.classList.add('active-rot'); scheduleRender();
 }
+
+// canvasSize only resizes the DITHERED canvas
 function updateCanvasSize(v) {
-  canvasSz = +v; if (sourceImg) scheduleRender();
+  dithCanvasSz = +v;
+  if (sourceImg) scheduleRender();
 }
 
 // ─────────────────────────────────────────
-// 11. MEDIA LOADING
+// 9.  MEDIA LOADING
 // ─────────────────────────────────────────
 function loadMedia(inp) {
   const f = inp.files[0]; if (!f) return;
@@ -387,16 +443,16 @@ function loadMedia(inp) {
   }
 }
 function showPreviews() {
-  document.getElementById('dropZone').style.display  = 'none';
+  document.getElementById('dropZone').style.display   = 'none';
   document.getElementById('previewWrapper').style.display = 'flex';
   document.getElementById('cropBar').classList.add('visible');
 }
 function togglePlay() {
   if (videoEl.paused) { videoEl.play(); liveLoop(); }
-  else { videoEl.pause(); cancelAnimationFrame(animFrame); }
+  else { videoEl.pause(); cancelAnimationFrame(vidAnimFrame); }
 }
-function liveLoop() { grabVideoFrame(); render(); animFrame = requestAnimationFrame(liveLoop); }
-function captureFrame() { videoEl.pause(); cancelAnimationFrame(animFrame); grabVideoFrame(); scheduleRender(); }
+function liveLoop() { grabVideoFrame(); render(); vidAnimFrame = requestAnimationFrame(liveLoop); }
+function captureFrame() { videoEl.pause(); cancelAnimationFrame(vidAnimFrame); grabVideoFrame(); scheduleRender(); }
 function grabVideoFrame() {
   const w = videoEl.videoWidth || 640, h = videoEl.videoHeight || 360;
   tempCanvas.width = w; tempCanvas.height = h;
@@ -405,128 +461,86 @@ function grabVideoFrame() {
 }
 
 // ─────────────────────────────────────────
-// 12. CROP / ASPECT RATIO SYSTEM
+// 10. CROP / ASPECT RATIO
 // ─────────────────────────────────────────
-const RATIOS = {
-  'free':  null,
-  '1:1':   [1, 1],
-  '4:5':   [4, 5],
-  '5:4':   [5, 4],
-  '16:9':  [16, 9],
-  '9:16':  [9, 16],
-};
+const RATIOS = { free: null, '1:1': [1,1], '4:5': [4,5], '5:4': [5,4], '16:9': [16,9], '9:16': [9,16] };
+const CROP_DISPLAY_SZ = 320;  // crop canvas is always fixed — independent of canvasSize
 
-function resetCrop() {
-  cropOffX = 0; cropOffY = 0; cropScale = 1;
-}
+function resetCrop() { cropOffX = 0; cropOffY = 0; cropScale = 1; }
 
 function setRatio(key, btn) {
   document.querySelectorAll('.ratio-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   cropRatio = RATIOS[key];
   resetCrop();
+  document.getElementById('cropBox').style.display = key === 'free' ? 'none' : '';
   drawCropCanvas();
+  scheduleRender();
 }
 
-// Returns an ImageBitmap or OffscreenCanvas cropped/scaled from sourceImg
-// according to current cropRatio, cropOffX/Y, cropScale.
 function getCropSource() {
-  if (!sourceImg) return null;
-  if (!cropRatio) return sourceImg;   // free = use full image
-
+  if (!sourceImg || !cropRatio) return sourceImg;
   const [rw, rh] = cropRatio;
   const iw = sourceImg.naturalWidth  || sourceImg.width;
   const ih = sourceImg.naturalHeight || sourceImg.height;
-
-  // Compute crop rect in image-space
   let cw, ch;
-  if (iw / ih > rw / rh) {
-    ch = ih * cropScale;
-    cw = ch * (rw / rh);
-  } else {
-    cw = iw * cropScale;
-    ch = cw * (rh / rw);
-  }
+  if (iw / ih > rw / rh) { ch = ih * cropScale; cw = ch * (rw / rh); }
+  else                    { cw = iw * cropScale; ch = cw * (rh / rw); }
   cw = Math.round(cw); ch = Math.round(ch);
-
   const offX = Math.round((iw - cw) / 2 + cropOffX);
   const offY = Math.round((ih - ch) / 2 + cropOffY);
-
   const oc = document.createElement('canvas');
-  oc.width  = cw; oc.height = ch;
+  oc.width = cw; oc.height = ch;
   oc.getContext('2d').drawImage(sourceImg, offX, offY, cw, ch, 0, 0, cw, ch);
   return oc;
 }
 
-// Draw the crop preview in the cropCanvas
 function drawCropCanvas() {
   if (!sourceImg) return;
-
-  const displaySz = canvasSz;
-  cropCanvas.width  = displaySz;
-  cropCanvas.height = displaySz;
+  const sz = CROP_DISPLAY_SZ;
+  cropCanvas.width = sz; cropCanvas.height = sz;
   const ctx = cropCanvas.getContext('2d');
-  ctx.clearRect(0, 0, displaySz, displaySz);
-
+  ctx.clearRect(0, 0, sz, sz);
   const iw = sourceImg.naturalWidth  || sourceImg.width;
   const ih = sourceImg.naturalHeight || sourceImg.height;
 
-  if (!cropRatio) {
-    // Draw full image stretched to canvas
-    ctx.drawImage(sourceImg, 0, 0, displaySz, displaySz);
-    return;
-  }
+  if (!cropRatio) { ctx.drawImage(sourceImg, 0, 0, sz, sz); return; }
 
   const [rw, rh] = cropRatio;
-
-  // How big is the crop rect on screen?
   let rectW, rectH;
-  if (rw >= rh) { rectW = displaySz; rectH = displaySz * (rh / rw); }
-  else          { rectH = displaySz; rectW = displaySz * (rw / rh); }
-  const rectX = (displaySz - rectW) / 2;
-  const rectY = (displaySz - rectH) / 2;
+  if (rw >= rh) { rectW = sz; rectH = sz * (rh / rw); }
+  else          { rectH = sz; rectW = sz * (rw / rh); }
+  const rectX = (sz - rectW) / 2, rectY = (sz - rectH) / 2;
 
-  // Scale factor: image pixels per screen pixel
-  const scaleImg = (iw / ih > rw / rh)
-    ? ih / rectH * cropScale
-    : iw / rectW * cropScale;
-
-  // Source rect
-  const srcW = rectW * scaleImg;
-  const srcH = rectH * scaleImg;
+  const scaleImg = (iw / ih > rw / rh) ? ih / rectH * cropScale : iw / rectW * cropScale;
+  const srcW = rectW * scaleImg, srcH = rectH * scaleImg;
   const srcX = (iw - srcW) / 2 - cropOffX * scaleImg;
   const srcY = (ih - srcH) / 2 - cropOffY * scaleImg;
 
-  // Darken outside crop area — draw full image dimmed
+  // dimmed full image behind
   ctx.globalAlpha = 0.3;
-  const fitScale = Math.min(displaySz / iw, displaySz / ih);
-  const fitW = iw * fitScale, fitH = ih * fitScale;
-  ctx.drawImage(sourceImg, (displaySz-fitW)/2, (displaySz-fitH)/2, fitW, fitH);
+  const fs = Math.min(sz / iw, sz / ih);
+  ctx.drawImage(sourceImg, (sz - iw*fs)/2, (sz - ih*fs)/2, iw*fs, ih*fs);
   ctx.globalAlpha = 1;
 
-  // Draw crop area bright
+  // bright crop area
   ctx.save();
-  ctx.beginPath();
-  ctx.rect(rectX, rectY, rectW, rectH);
-  ctx.clip();
+  ctx.beginPath(); ctx.rect(rectX, rectY, rectW, rectH); ctx.clip();
   ctx.drawImage(sourceImg, srcX, srcY, srcW, srcH, rectX, rectY, rectW, rectH);
   ctx.restore();
 
-  // Crop border
-  ctx.strokeStyle = 'rgba(224,255,79,0.8)';
-  ctx.lineWidth   = 1;
-  ctx.strokeRect(rectX + 0.5, rectY + 0.5, rectW - 1, rectH - 1);
+  // border
+  ctx.strokeStyle = 'rgba(224,255,79,0.8)'; ctx.lineWidth = 1;
+  ctx.strokeRect(rectX+.5, rectY+.5, rectW-1, rectH-1);
 
-  // Rule-of-thirds grid
-  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-  ctx.lineWidth = 0.5;
+  // rule-of-thirds
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = .5;
   for (let i = 1; i < 3; i++) {
-    ctx.beginPath(); ctx.moveTo(rectX + rectW*i/3, rectY); ctx.lineTo(rectX + rectW*i/3, rectY+rectH); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(rectX, rectY + rectH*i/3); ctx.lineTo(rectX+rectW, rectY + rectH*i/3); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(rectX+rectW*i/3, rectY); ctx.lineTo(rectX+rectW*i/3, rectY+rectH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(rectX, rectY+rectH*i/3); ctx.lineTo(rectX+rectW, rectY+rectH*i/3); ctx.stroke();
   }
 }
 
-// Drag to pan
 cropCanvas.addEventListener('mousedown', e => {
   if (!cropRatio) return;
   cropDragging = true;
@@ -542,8 +556,6 @@ window.addEventListener('mousemove', e => {
 window.addEventListener('mouseup', () => {
   if (cropDragging) { cropDragging = false; scheduleRender(); }
 });
-
-// Pinch/scroll to zoom crop
 cropCanvas.addEventListener('wheel', e => {
   if (!cropRatio) return;
   e.preventDefault();
@@ -552,7 +564,7 @@ cropCanvas.addEventListener('wheel', e => {
 }, { passive: false });
 
 // ─────────────────────────────────────────
-// 13. COLLECT PARAMS HELPER
+// 11. COLLECT PARAMS
 // ─────────────────────────────────────────
 function collectParams() {
   return {
@@ -561,14 +573,13 @@ function collectParams() {
     bgColor:  document.getElementById('bgColor').value,
     scaleMin: +document.getElementById('scaleMin').value / 100,
     scaleMax: +document.getElementById('scaleMax').value / 100,
-    rotation,
-    inverted,
+    rotation, inverted,
     hlColors: [...hlColors],
   };
 }
 
 // ─────────────────────────────────────────
-// 14. RENDER ENGINE
+// 12. RENDER ENGINE
 // ─────────────────────────────────────────
 const BAYER4 = [[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]];
 
@@ -576,8 +587,8 @@ async function getSvgImg(idx) {
   return new Promise(resolve => {
     if (!svgData[idx]) { resolve(null); return; }
     const colored = recolorSvg(svgData[idx], svgColors[idx]);
-    const blob    = new Blob([colored], { type: 'image/svg+xml' });
-    const img     = new Image();
+    const blob = new Blob([colored], { type: 'image/svg+xml' });
+    const img  = new Image();
     img.onload  = () => resolve(img);
     img.onerror = () => resolve(null);
     img.src = URL.createObjectURL(blob);
@@ -586,11 +597,9 @@ async function getSvgImg(idx) {
 
 async function renderToCanvas(canvas, srcImg, params) {
   const { grid, mode, bgColor, scaleMin, scaleMax, rotation: rot, inverted: inv, hlColors: colors } = params;
-  const sz   = canvas.width;
-  const cols = Math.ceil(sz / grid);
-  const rows = Math.ceil(sz / grid);
+  const sz = canvas.width;
+  const cols = Math.ceil(sz / grid), rows = Math.ceil(sz / grid);
 
-  // sample luminance from source
   const tc = document.createElement('canvas'); tc.width = sz; tc.height = sz;
   const tctx = tc.getContext('2d'); tctx.drawImage(srcImg, 0, 0, sz, sz);
   const pd  = tctx.getImageData(0, 0, sz, sz).data;
@@ -607,14 +616,14 @@ async function renderToCanvas(canvas, srcImg, params) {
 
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
-      const px = col * grid, py = row * grid;
-      const cx = Math.min(px + Math.floor(grid / 2), sz - 1);
-      const cy = Math.min(py + Math.floor(grid / 2), sz - 1);
-      let L = lumCopy[cy * sz + cx];
+      const px = col*grid, py = row*grid;
+      const cx = Math.min(px + Math.floor(grid/2), sz-1);
+      const cy = Math.min(py + Math.floor(grid/2), sz-1);
+      let L = lumCopy[cy*sz+cx];
 
       if (mode === 'threshold') { L = L > 128 ? 255 : 0; }
-      else if (mode === 'random')   { L = Math.min(255, Math.max(0, L + (Math.random()-0.5)*64)); }
-      else if (mode === 'ordered')  { const bv = BAYER4[row%4][col%4]/16; L = Math.min(255, Math.max(0, L+(bv-0.5)*80)); }
+      else if (mode === 'random')  { L = Math.min(255, Math.max(0, L+(Math.random()-.5)*64)); }
+      else if (mode === 'ordered') { const bv=BAYER4[row%4][col%4]/16; L=Math.min(255,Math.max(0,L+(bv-.5)*80)); }
 
       if (inv) L = 255 - L;
       const hlIdx   = Math.min(6, Math.floor(L / (256/7)));
@@ -623,10 +632,9 @@ async function renderToCanvas(canvas, srcImg, params) {
       const cellSz  = grid * Math.min(scaleMax, Math.max(scaleMin, scaledT));
 
       dctx.save();
-      dctx.translate(px + grid/2, py + grid/2);
+      dctx.translate(px+grid/2, py+grid/2);
       dctx.rotate(rot * Math.PI / 180);
       dctx.translate(-cellSz/2, -cellSz/2);
-
       if (anySvg && svgImgs[hlIdx]) { dctx.drawImage(svgImgs[hlIdx], 0, 0, cellSz, cellSz); }
       else { dctx.fillStyle = colors[hlIdx]; dctx.fillRect(0, 0, cellSz, cellSz); }
       dctx.restore();
@@ -648,23 +656,27 @@ async function renderToCanvas(canvas, srcImg, params) {
 
 async function render() {
   if (!sourceImg) return;
-  const sz     = canvasSz;
   const cropSrc = getCropSource() || sourceImg;
-  const params = collectParams();
 
-  origCanvas.width  = sz; origCanvas.height = sz;
-  dithCanvas.width  = sz; dithCanvas.height = sz;
+  // Original canvas: natural size of the cropped source, not affected by canvasSize slider
+  const srcW = cropSrc.naturalWidth  || cropSrc.width  || 640;
+  const srcH = cropSrc.naturalHeight || cropSrc.height || 480;
+  const ORIG_MAX = 320;
+  const origScale = Math.min(1, ORIG_MAX / Math.max(srcW, srcH));
+  origCanvas.width  = Math.round(srcW * origScale);
+  origCanvas.height = Math.round(srcH * origScale);
+  origCanvas.getContext('2d').drawImage(cropSrc, 0, 0, origCanvas.width, origCanvas.height);
 
-  origCanvas.getContext('2d').drawImage(cropSrc, 0, 0, sz, sz);
+  // Dithered canvas: uses dithCanvasSz (from canvasSize slider)
+  dithCanvas.width  = dithCanvasSz;
+  dithCanvas.height = dithCanvasSz;
+  await renderToCanvas(dithCanvas, cropSrc, collectParams());
 
-  await renderToCanvas(dithCanvas, cropSrc, params);
-
-  // keep crop canvas in sync
   drawCropCanvas();
 }
 
 // ─────────────────────────────────────────
-// 15. DRAG & DROP
+// 13. DRAG & DROP
 // ─────────────────────────────────────────
 const ca = document.getElementById('canvasArea');
 ca.addEventListener('dragover',  e => { e.preventDefault(); ca.classList.add('drop-over'); });
@@ -676,8 +688,26 @@ ca.addEventListener('drop', e => {
 });
 
 // ─────────────────────────────────────────
-// 16. INIT
+// 14. REBUILD DYNAMIC UI (after lang change)
 // ─────────────────────────────────────────
-buildHlStrip();
-buildSvgSlots();
-updateHlPicker();
+function rebuildDynamicUI() {
+  buildHlStrip();
+  buildSvgSlots();
+  updateHlPicker();
+  bindTooltips();
+}
+
+// ─────────────────────────────────────────
+// 15. INIT
+// ─────────────────────────────────────────
+(function init() {
+  const saved = localStorage.getItem('ditherLang') || 'EN';
+  // Language file is already loaded via <script> in HTML (default EN).
+  // If saved preference differs, reload it.
+  if (saved !== 'EN') {
+    setLanguage(saved);
+  } else {
+    applyLang();
+    rebuildDynamicUI();
+  }
+})();
